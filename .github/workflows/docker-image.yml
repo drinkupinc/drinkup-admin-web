@@ -1,0 +1,103 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "!main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{github.repository}}
+
+jobs:
+
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Docker Registry Login
+        uses: docker/login-action@v2.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # - name: Print
+      #   run: env | sort
+
+      - name: Docker Metadata action
+        uses: docker/metadata-action@v4.1.1
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{env.IMAGE_NAME}}
+
+      - name: Setup Commit SHA Variable
+        run: |
+          echo "REPO_GITSHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Setup Image Repository Variable
+        run: |
+          MY_REPO_URL="${REGISTRY}/${IMAGE_NAME}"
+          echo "REPO_URL=$(echo -n ${MY_REPO_URL,,})" >> $GITHUB_ENV
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REPO_URL}}:latest,${{ env.REPO_URL}}:${{ env.REPO_GITSHA }}
+
+
+      - name: Send Slack Success Notification
+        if: ${{ success() }}
+        uses: slackapi/slack-github-action@v1.23.0
+        with:
+          channel-id: 'wintermute'
+          payload: |
+            {
+              "text": ":white_check_mark: Build of ${{github.head_ref}} successful!",
+              "attachments": [
+                {
+                  "color": "4CBB17",
+                  "fields": [
+                    {
+                      "title": "",
+                      "short": false,
+                      "value": "PR: ${{ github.event.pull_request.html_url || github.event.head_commit.url }}\nGITSHA: ${{env.REPO_GITSHA}}\nACTION: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN}}
+
+
+      - name: Send Dockerization Failed Notification
+        if: ${{ failure() }}
+        uses: slackapi/slack-github-action@v1.23.0
+        with:
+          channel-id: 'wintermute'
+          payload: |
+            {
+              "text": "Production dockerization failure of ${{github.head_ref}}",
+              "attachments": [
+                  {
+                    "color": "EE4B2B",
+                    "fields": [
+                      {
+                        "title": "",
+                        "short": false,
+                        "value": "PR: ${{ github.event.pull_request.html_url || github.event.head_commit.url }}\n\nACTION: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                      }
+                    ]
+                  }
+                ]
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN}}
+
